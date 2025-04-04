@@ -1,4 +1,12 @@
-import openpyxl
+import subprocess
+import sys
+
+try:
+    import openpyxl
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
+    import openpyxl
+
 import tkinter as tk
 from tkinter import filedialog
 from collections import deque
