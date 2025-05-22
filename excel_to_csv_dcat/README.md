@@ -45,6 +45,7 @@ Slijedite ove korake za instalaciju i pokretanje paketa na Windows operativnom s
 
      ```powershell
      pip install -r requirements.txt
+     pip install -e .
      ```
 
 5. **Pokrenite alat**:
