@@ -23,9 +23,9 @@ class ExcelConverterGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Excel to CSV Converter with DCAT")
-        
+
         self.root.geometry("600x400")
-        
+
         # Variables
         self.input_file: Optional[str] = None
         self.output_dir: Optional[str] = None
@@ -33,44 +33,44 @@ class ExcelConverterGUI:
         self.publisher_name = tk.StringVar(value="Example Organization")
         self.publisher_uri = tk.StringVar(value="http://example.org/publisher")
         self.license_uri = tk.StringVar(value="http://creativecommons.org/licenses/by/4.0/")
-        
+
         # AI-related variables
         self.enable_ai = tk.BooleanVar(value=False)
         self.llm_provider = tk.StringVar(value="openai")
         self.llm_api_key = tk.StringVar(value="")
         self.skip_header_ai = tk.BooleanVar(value=False)
         self.skip_datatype_ai = tk.BooleanVar(value=False)
-        
+
         self._create_widgets()
-    
+
     def _create_widgets(self):
         """Create and layout GUI widgets."""
         # Input file selection
         input_frame = ttk.LabelFrame(self.root, text="Input", padding="5")
         input_frame.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        
+
         self.input_label = ttk.Label(input_frame, text="No file selected")
         self.input_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        
+
         ttk.Button(input_frame, text="Select Excel File", command=self._select_input).grid(
             row=0, column=1, padx=5, pady=5
         )
-        
+
         # Output directory selection
         output_frame = ttk.LabelFrame(self.root, text="Output", padding="5")
         output_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        
+
         self.output_label = ttk.Label(output_frame, text="No directory selected")
         self.output_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        
+
         ttk.Button(output_frame, text="Select Output Directory", command=self._select_output).grid(
             row=0, column=1, padx=5, pady=5
         )
-        
+
         # Metadata options
         metadata_frame = ttk.LabelFrame(self.root, text="Metadata Options", padding="5")
         metadata_frame.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        
+
         # Publisher name
         ttk.Label(metadata_frame, text="Publisher Name:").grid(
             row=0, column=0, padx=5, pady=5, sticky="w"
@@ -78,7 +78,7 @@ class ExcelConverterGUI:
         ttk.Entry(metadata_frame, textvariable=self.publisher_name).grid(
             row=0, column=1, padx=5, pady=5, sticky="ew"
         )
-        
+
         # Publisher URI
         ttk.Label(metadata_frame, text="Publisher URI:").grid(
             row=1, column=0, padx=5, pady=5, sticky="w"
@@ -86,7 +86,7 @@ class ExcelConverterGUI:
         ttk.Entry(metadata_frame, textvariable=self.publisher_uri).grid(
             row=1, column=1, padx=5, pady=5, sticky="ew"
         )
-        
+
         # License URI
         ttk.Label(metadata_frame, text="License URI:").grid(
             row=2, column=0, padx=5, pady=5, sticky="w"
@@ -102,24 +102,24 @@ class ExcelConverterGUI:
         ttk.Entry(metadata_frame, textvariable=self.base_uri).grid(
             row=3, column=1, padx=5, pady=5, sticky="ew"
         )
-        
+
         # AI Features section
         ai_frame = ttk.LabelFrame(self.root, text="AI Features (Experimental)", padding="5")
         ai_frame.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        
+
         # Enable AI checkbox
         ttk.Checkbutton(ai_frame, text="Enable AI features", variable=self.enable_ai).grid(
             row=0, column=0, columnspan=2, padx=5, pady=5, sticky="w"
         )
-        
+
         # LLM Provider
         ttk.Label(ai_frame, text="LLM Provider:").grid(
             row=1, column=0, padx=5, pady=5, sticky="w"
         )
-        provider_combo = ttk.Combobox(ai_frame, textvariable=self.llm_provider, 
+        provider_combo = ttk.Combobox(ai_frame, textvariable=self.llm_provider,
                                       values=["openai", "gemini"], state="readonly")
         provider_combo.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        
+
         # API Key
         ttk.Label(ai_frame, text="API Key:").grid(
             row=2, column=0, padx=5, pady=5, sticky="w"
@@ -127,7 +127,7 @@ class ExcelConverterGUI:
         ttk.Entry(ai_frame, textvariable=self.llm_api_key, show="*").grid(
             row=2, column=1, padx=5, pady=5, sticky="ew"
         )
-        
+
         # Skip options
         ttk.Checkbutton(ai_frame, text="Skip header generation", variable=self.skip_header_ai).grid(
             row=3, column=0, padx=5, pady=5, sticky="w"
@@ -135,22 +135,22 @@ class ExcelConverterGUI:
         ttk.Checkbutton(ai_frame, text="Skip datatype validation", variable=self.skip_datatype_ai).grid(
             row=3, column=1, padx=5, pady=5, sticky="w"
         )
-        
+
         # Progress
         self.progress = ttk.Progressbar(self.root, mode='indeterminate')
         self.progress.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        
+
         # Convert button
         self.convert_btn = ttk.Button(
             self.root, text="Convert", command=self._convert, state="disabled"
         )
         self.convert_btn.grid(row=6, column=0, columnspan=2, padx=5, pady=5)
-        
+
         # Configure grid
         self.root.columnconfigure(0, weight=1)
         for frame in (input_frame, output_frame, metadata_frame, ai_frame):
             frame.columnconfigure(1, weight=1)
-    
+
     def _select_input(self):
         """Handle input file selection."""
         filename = filedialog.askopenfilename(
@@ -161,7 +161,7 @@ class ExcelConverterGUI:
             self.input_file = filename
             self.input_label.config(text=os.path.basename(filename))
             self._update_convert_button()
-    
+
     def _select_output(self):
         """Handle output directory selection."""
         dirname = filedialog.askdirectory(title="Select Output Directory")
@@ -169,15 +169,15 @@ class ExcelConverterGUI:
             self.output_dir = dirname
             self.output_label.config(text=os.path.basename(dirname) or dirname)
             self._update_convert_button()
-    
+
     def _update_convert_button(self):
         """Enable/disable convert button based on selections."""
         if self.input_file and self.output_dir:
             self.convert_btn.config(state="normal")
-        
+
         else:
             self.convert_btn.config(state="disabled")
-    
+
     def _convert(self):
         """Handle file conversion."""
         self.progress.start()
@@ -227,7 +227,7 @@ class ExcelConverterGUI:
             message = f"Successfully processed {len(csv_files)} tables:\n"
             message += "\n".join(f"- {os.path.basename(f)}" for f in csv_files)
             message += f"\n\nMetadata saved to: {os.path.basename(metadata_file)}"
-            
+
             messagebox.showinfo("Success", message)
 
         except Exception as e:

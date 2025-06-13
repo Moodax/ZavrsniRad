@@ -7,14 +7,17 @@ import pandas as pd
 import openpyxl
 import os
 import re
-from tqdm import tqdm
+from .config import setup_logging, get_config_value
+
+# Set up logger
+logger = setup_logging()
 
 # --- Helper Functions ---
 def is_cell_effectively_empty(value) -> bool:
     """Check if a cell's value is None or a string containing only whitespace."""
     if value is None:
         return True
-    if isinstance(value, str) and value.isspace(): 
+    if isinstance(value, str) and value.isspace():
         return True
     return False
 
@@ -22,11 +25,11 @@ def is_numeric_value(value) -> bool:
     """Check if a cell's value represents a number (integer, float, or numeric string)."""
     if value is None:
         return False
-    
+
     # If it's already a number type
     if isinstance(value, (int, float)):
         return True
-    
+
     # If it's a string, try to parse it as a number
     if isinstance(value, str):
         value_str = value.strip()
@@ -37,31 +40,31 @@ def is_numeric_value(value) -> bool:
             return True
         except ValueError:
             return False
-    
+
     return False
 
 def is_string_value(value) -> bool:
     """Check if a cell's value is a string type (not a number, date, time, etc.)."""
     if value is None:
         return False
-    
+
     # Import datetime types for checking
     from datetime import datetime, date, time
-    
+
     # If it's a date, time, or datetime, it's not a string
     if isinstance(value, (datetime, date, time)):
         return False
-    
+
     # If it's a number, it's not a string
     if isinstance(value, (int, float)):
         return False
-    
+
     # If it's a string, check if it's actually a number in string format
     if isinstance(value, str):
         value_str = value.strip()
         if not value_str:
             return False
-        
+
         # Try to parse as number - if it succeeds, it's not a pure string
         try:
             float(value_str)
@@ -69,7 +72,7 @@ def is_string_value(value) -> bool:
         except ValueError:
             # It's a pure string (not numeric)
             return True
-    
+
     # For any other type, consider it non-string
     return False
 
@@ -111,10 +114,10 @@ def flood_fill_merged_aware(
         return None  # Starting cell (or its anchor) is empty
 
     queue = deque([(start_row, start_col)])
-    
+
     current_min_r, current_max_r = start_row, start_row
     current_min_c, current_max_c = start_col, start_col
-    
+
     cells_in_this_region = set()
 
     while queue:
@@ -122,15 +125,15 @@ def flood_fill_merged_aware(
 
         if (r, c) in cells_in_this_region or (r, c) in visited:
             continue
-        
+
         val_check_r, val_check_c = r, c
         min_r_eff, max_r_eff, min_c_eff, max_c_eff = r, r, c, c
-        
+
         mc_extent = merged_cell_map.get((r, c))
         if mc_extent:
             min_r_eff, max_r_eff, min_c_eff, max_c_eff = mc_extent
             val_check_r, val_check_c = mc_extent[0], mc_extent[2]  # Value is at top-left
-        
+
         if is_cell_effectively_empty(sheet.cell(val_check_r, val_check_c).value):
             continue
 
@@ -138,7 +141,7 @@ def flood_fill_merged_aware(
             for ic in range(min_c_eff, max_c_eff + 1):
                 if (ir, ic) not in visited:
                     cells_in_this_region.add((ir, ic))
-        
+
         current_min_r = min(current_min_r, min_r_eff)
         current_max_r = max(current_max_r, max_r_eff)
         current_min_c = min(current_min_c, min_c_eff)
@@ -184,10 +187,10 @@ def flood_fill_merged_aware(
                         n_val_r, n_val_c = n_mc_extent[0], n_mc_extent[2]
                     if not is_cell_effectively_empty(sheet.cell(n_val_r, n_val_c).value):
                         queue.append((nr, nc))
-    
+
     if not cells_in_this_region:
         return None
-    
+
     visited.update(cells_in_this_region)
     return current_min_r, current_max_r, current_min_c, current_max_c
 
@@ -206,7 +209,7 @@ def get_initial_blocks(sheet, max_row: int, max_col: int, merged_cell_map: dict)
             if mc_extent:
                 is_part_of_merged = True
                 val_check_r, val_check_c = mc_extent[0], mc_extent[2]
-            
+
             if is_part_of_merged and (r_start != val_check_r or c_start != val_check_c):
                 if (val_check_r, val_check_c) in visited and (r_start, c_start) not in visited:
                      visited.add((r_start, c_start))
@@ -265,17 +268,17 @@ def get_used_range_effective(sheet, merged_cell_map) -> Tuple[int, int, int, int
                 eff_min_r, eff_max_r, eff_min_c, eff_max_c = r_iter, r_iter, c_iter, c_iter
                 if mc_extent:
                     eff_min_r, eff_max_r, eff_min_c, eff_max_c = mc_extent
-                
+
                 min_r_used = min(min_r_used, eff_min_r)
                 max_r_used = max(max_r_used, eff_max_r)
                 min_c_used = min(min_c_used, eff_min_c)
                 max_c_used = max(max_c_used, eff_max_c)
-    
+
     if not found_any:
         return (1, 0, 1, 0)
     return (min_r_used, max_r_used, min_c_used, max_c_used)
 
-def attempt_horizontal_merge(sheet, blocks: List[Tuple[int, int, int, int]], 
+def attempt_horizontal_merge(sheet, blocks: List[Tuple[int, int, int, int]],
                              max_empty_gap_cols: int = 1,
                              min_vertical_overlap_ratio: float = 0.8) -> List[Tuple[int, int, int, int]]:
     """Attempt to merge horizontally aligned blocks with significant vertical overlap."""
@@ -284,27 +287,27 @@ def attempt_horizontal_merge(sheet, blocks: List[Tuple[int, int, int, int]],
 
     current_blocks = sorted(blocks, key=lambda b: (b[0], b[2]))
 
-    while True: 
+    while True:
         merged_in_this_pass = False
-        next_blocks_candidate = [] 
+        next_blocks_candidate = []
         merged_into_another_in_pass = [False] * len(current_blocks)
 
         for i in range(len(current_blocks)):
-            if merged_into_another_in_pass[i]: 
+            if merged_into_another_in_pass[i]:
                 continue
-            
+
             base_block_being_built = list(current_blocks[i])
 
             for j in range(i + 1, len(current_blocks)):
-                if merged_into_another_in_pass[j]: 
+                if merged_into_another_in_pass[j]:
                     continue
-                
+
                 candidate_block = current_blocks[j]
 
                 # Condition 1: Significant Vertical Overlap
                 b_min_r, b_max_r = base_block_being_built[0], base_block_being_built[1]
                 c_min_r, c_max_r = candidate_block[0], candidate_block[1]
-                
+
                 overlap_start_row = max(b_min_r, c_min_r)
                 overlap_end_row = min(b_max_r, c_max_r)
                 overlap_height = (overlap_end_row - overlap_start_row + 1) if overlap_start_row <= overlap_end_row else 0
@@ -314,10 +317,10 @@ def attempt_horizontal_merge(sheet, blocks: List[Tuple[int, int, int, int]],
 
                 is_significantly_overlapped = False
                 if base_height > 0 and cand_height > 0 and overlap_height > 0:
-                    if (overlap_height / base_height >= min_vertical_overlap_ratio and 
+                    if (overlap_height / base_height >= min_vertical_overlap_ratio and
                         overlap_height / cand_height >= min_vertical_overlap_ratio):
                         is_significantly_overlapped = True
-                
+
                 is_candidate_to_right = candidate_block[2] > base_block_being_built[3]
 
                 if is_significantly_overlapped and is_candidate_to_right:
@@ -337,22 +340,22 @@ def attempt_horizontal_merge(sheet, blocks: List[Tuple[int, int, int, int]],
                                         break
                                 if not gap_is_truly_empty:
                                     break
-                        
+
                         if gap_is_truly_empty:
                             # Merge: update extents
                             base_block_being_built[0] = min(b_min_r, c_min_r) # New min_row
                             base_block_being_built[1] = max(b_max_r, c_max_r) # New max_row
                             base_block_being_built[3] = max(base_block_being_built[3], candidate_block[3]) # New max_col
-                            merged_into_another_in_pass[j] = True 
+                            merged_into_another_in_pass[j] = True
                             merged_in_this_pass = True
-            
+
             next_blocks_candidate.append(tuple(base_block_being_built))
-        
+
         current_blocks = sorted(next_blocks_candidate, key=lambda b: (b[0], b[2]))
-        
+
         if not merged_in_this_pass:
             break
-            
+
     return current_blocks
 
 def process_merged_cells(sheet) -> List[Tuple[int, int, int, int, any]]:
@@ -379,14 +382,14 @@ def count_effective_content_segments(sheet, r: int, c_start: int, c_end: int, me
         if mc_extent:
             val_check_r, val_check_c = mc_extent[0], mc_extent[2]  # Anchor for value
             effective_cell_max_c = min(mc_extent[3], c_end)  # Merged cell ends at its own max_col or block_max_col
-        
+
         is_empty = is_cell_effectively_empty(sheet.cell(val_check_r, val_check_c).value)
 
         if not is_empty and not in_segment:
             segments += 1
             in_segment = True
         elif is_empty and in_segment:
-            in_segment = False        
+            in_segment = False
         current_c = effective_cell_max_c + 1  # Move to the next cell after the current one (or merged segment)
     return segments
 
@@ -398,26 +401,32 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
     wb = openpyxl.load_workbook(filename=excel_buffer, read_only=False, data_only=True)
 
     # Process sheets with progress bar
-    for sheet_name in tqdm(wb.sheetnames, desc="Processing Excel sheets", unit="sheet", leave=False):
+    logger.info("Processing Excel sheets...")
+    for sheet_name in wb.sheetnames:
         sheet = wb[sheet_name]
         current_sheet_merged_map = get_merged_cell_map(sheet)
 
         # 1. Initial Block Detection
         boxes = get_initial_blocks(sheet, sheet.max_row, sheet.max_column, current_sheet_merged_map)
-        
+
         # Fallback for completely empty sheets or sheets with no detectable blocks initially
         if not boxes and sheet.max_row > 0 and sheet.max_column > 0:
             min_r, max_r, min_c, max_c = get_used_range_effective(sheet, current_sheet_merged_map)
             if max_r >= min_r and max_c >= min_c: # Check if a valid range was found
                 boxes = [(min_r, max_r, min_c, max_c)]
-        
-        # 2. Consolidate initial fragments
-        boxes = merge_boxes(boxes, row_tol=0, col_tol=0) 
-        boxes.sort(key=lambda b: (b[0], b[1], b[2], b[3])) # Sort for predictable processing        # 3. Horizontal merging of adjacent blocks
-        boxes = attempt_horizontal_merge(sheet, boxes, max_empty_gap_cols=2, min_vertical_overlap_ratio=0.8)
+          # 2. Consolidate initial fragments
         boxes = merge_boxes(boxes, row_tol=0, col_tol=0)
+        boxes.sort(key=lambda b: (b[0], b[1], b[2], b[3])) # Sort for predictable processing
+          # 3. Horizontal merging of adjacent blocks
+        max_gap_cols = get_config_value("max_empty_gap_cols", 2)
+        min_overlap_ratio = get_config_value("min_vertical_overlap_ratio", 0.8)
+        boxes = attempt_horizontal_merge(sheet, boxes, max_empty_gap_cols=max_gap_cols, min_vertical_overlap_ratio=min_overlap_ratio)
 
-        # 4. Filter trivial blocks  
+        merge_row_tol = get_config_value("merge_tolerance_rows", 0)
+        merge_col_tol = get_config_value("merge_tolerance_cols", 0)
+        boxes = merge_boxes(boxes, row_tol=merge_row_tol, col_tol=merge_col_tol)
+
+        # 4. Filter trivial blocks
         final_boxes_for_csv = []
         for r_min, r_max, c_min, c_max in boxes:
             if r_min == r_max and c_min == c_max:  # 1x1 cell block
@@ -428,27 +437,31 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                 cell_value_obj = sheet.cell(val_check_r, val_check_c).value
                 s_val = str(cell_value_obj if cell_value_obj is not None else "").strip()
                 if not re.search(r'[a-zA-Z0-9]', s_val):
-                    print(f"INFO: Skipping trivial 1x1 table at ({r_min},{c_min}) with content: '{str(cell_value_obj)}' (no alphanumeric chars)")
+                    logger.info(f"Skipping trivial 1x1 table at ({r_min},{c_min}) with content: '{str(cell_value_obj)}' (no alphanumeric chars)")
                     continue
-            final_boxes_for_csv.append((r_min, r_max, c_min, c_max))        # 5. Process each table with new logic: merged cells → titles → headers → data        # First pass: Extract title/header info from all tables
+            final_boxes_for_csv.append((r_min, r_max, c_min, c_max))
+
+        # 5. Process each table with new logic: merged cells → titles → headers → data
+        # First pass: Extract title/header info from all tables
         table_processing_results = []
-        for block_idx, (min_r, max_r, min_c, max_c) in enumerate(tqdm(final_boxes_for_csv, desc=f"Processing tables in {sheet_name}", unit="table", leave=False)):
-           
+        logger.info(f"Processing {len(final_boxes_for_csv)} tables in sheet '{sheet_name}'...")
+        for block_idx, (min_r, max_r, min_c, max_c) in enumerate(final_boxes_for_csv):
+
             # Step 1: Consolidate Merged Cells for the Current Block
 
-            
+
             # Create a consolidated table where merged cell values are repeated across the entire merged range
             block_height = max_r - min_r + 1
             block_width = max_c - min_c + 1
             consolidated_block_data = []
-            
+
             for i in range(block_height):  # for each row index within the block
                 current_sheet_row = min_r + i
                 current_consolidated_row = []
-                
+
                 for j in range(block_width):  # for each column index within the block
                     current_sheet_col = min_c + j
-                    
+
                     # Check if this cell is part of a merged range
                     mc_extent = current_sheet_merged_map.get((current_sheet_row, current_sheet_col))
                     if mc_extent:
@@ -461,22 +474,22 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                         # Regular, non-merged cell
                         cell_value = sheet.cell(current_sheet_row, current_sheet_col).value
                         current_consolidated_row.append(cell_value)
-                        
-                
+
+
                 consolidated_block_data.append(current_consolidated_row)
-             
-            
+
+
             if not consolidated_block_data or not any(any(str(cell).strip() for cell in row if not is_cell_effectively_empty(cell)) for row in consolidated_block_data):
-              
+
                 continue
-            
+
             # Step 2: Extract Title Information
-  
+
             table_title, data_after_title = extract_title_info(consolidated_block_data)
               # Step 3: Detect Header Information
-      
+
             csv_headers, final_data_rows = detect_header_info(data_after_title)
-            
+
             # Store the processing result
             table_processing_results.append({
                 "block_info": (min_r, max_r, min_c, max_c),
@@ -484,40 +497,37 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                 "table_title": table_title,
                 "csv_headers": csv_headers,
                 "final_data_rows": final_data_rows,
-                "has_data": len(final_data_rows) > 0
-            })
-            
-       
-        
+                "has_data": len(final_data_rows) > 0            })
+
         # Second pass: Handle title/header attachment for tables with no data
-     
+
         final_table_entries = []
-        
+
         i = 0
         while i < len(table_processing_results):
             current_result = table_processing_results[i]
-            
+
             if current_result["has_data"]:
                 # This table has data - process it normally
-            
+
                 final_table_entries.append(current_result)
                 i += 1
             else:
                 # This table has no data - check if we can attach it to the next table
-              
-                
+
+
                 # Look for the next table with data
                 next_data_table_idx = None
                 for j in range(i + 1, len(table_processing_results)):
                     if table_processing_results[j]["has_data"]:
                         next_data_table_idx = j
                         break
-                
+
                 if next_data_table_idx is not None:
                     # Found a next table with data - attach current table's title/headers to it
                     next_result = table_processing_results[next_data_table_idx]
-               
-                    
+
+
                     # Combine titles
                     combined_title = None
                     if current_result["table_title"] and next_result["table_title"]:
@@ -526,10 +536,10 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                         combined_title = current_result["table_title"]
                     elif next_result["table_title"]:
                         combined_title = next_result["table_title"]
-                    
+
                     # Combine headers (current table's headers take precedence if both exist)
                     combined_headers = current_result["csv_headers"] if current_result["csv_headers"] else next_result["csv_headers"]
-                    
+
                     # Create the merged result
                     merged_result = {
                         "block_info": next_result["block_info"],  # Use the data table's block info
@@ -537,20 +547,20 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                         "table_title": combined_title,
                         "csv_headers": combined_headers,
                         "final_data_rows": next_result["final_data_rows"],
-                        
+
                         "has_data": True
                     }
-                    
-              
+
+
                     final_table_entries.append(merged_result)
-                    
+
                     # Skip both the current table (no data) and the next table (merged)
                     i = next_data_table_idx + 1
                 else:
                     # No next table with data found - skip this orphaned table
- 
+
                     i += 1
-        
+
         # Third pass: Generate CSV files from final table entries
 
         table_entries = []
@@ -563,7 +573,7 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
             if entry['final_data_rows']:
                 actual_columns = len(entry['final_data_rows'][0]) if entry['final_data_rows'] else 0
                 detected_headers = entry['csv_headers'] if entry['csv_headers'] else []
-                
+
                 # Check if we have headers and if they match the number of columns
                 if detected_headers and any(str(header).strip() for header in detected_headers):
                     # We have non-empty headers
@@ -585,32 +595,32 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                 df = pd.DataFrame()
                 entry['csv_headers'] = []
                 include_header = False
-            
+
             # Generate CSV
             buf = BytesIO()
             df.to_csv(buf, index=False, header=include_header)
             buf.seek(0)
-            
+
             # Step 5: Assembling Output
 
             table_name_suffix = f"table_{len(table_entries) + 1}"
-            table_name = f"{sheet_name}_{table_name_suffix}" 
+            table_name = f"{sheet_name}_{table_name_suffix}"
             if len(final_table_entries) == 1:  # Only use sheet name if single table                if sheet_name not in ["Sheet", "Sheet1"] and not any(c.isdigit() for c in sheet_name):
                     table_name = sheet_name
             else:
                     table_name = f"{sheet_name}_{table_name_suffix}" if sheet_name else table_name_suffix
-            if not table_name: 
+            if not table_name:
                 table_name = f"UnnamedSheet_table_{len(table_entries) + 1}"
 
             table_entries.append({
-                "name": table_name, 
-                "buffer": buf, 
-                "headers": entry['csv_headers'], 
+                "name": table_name,
+                "buffer": buf,
+                "headers": entry['csv_headers'],
                 "dims": entry["block_info"],                "identified_title": entry['table_title'],
                 "has_original_headers": include_header
             })
-            
-     
+
+
         # Add all valid table entries to outputs
         outputs.extend(table_entries)
 
@@ -624,14 +634,14 @@ def extract_title_info(consolidated_data: List[List[Any]]) -> Tuple[Optional[str
     Returns: (title_text, remaining_table_data_rows)
     """
 
-    
+
     if not consolidated_data:
 
         return None, consolidated_data
-    
+
     title_parts = []
     rows_consumed_by_title = 0
-    
+
     for idx, row in enumerate(consolidated_data):
 
           # Count meaningful (non-empty) cells in the row
@@ -642,7 +652,7 @@ def extract_title_info(consolidated_data: List[List[Any]]) -> Tuple[Optional[str
                 if cell_str:  # Only count if there's actual non-empty content
                     meaningful_cells.append(cell_value)  # Store original value, not string
 
-        
+
         if len(meaningful_cells) == 1:
             # Single meaningful cell - check if it's a string (not numeric, date, time, etc.)
             cell_content = meaningful_cells[0]  # Use original value
@@ -653,7 +663,7 @@ def extract_title_info(consolidated_data: List[List[Any]]) -> Tuple[Optional[str
 
             else:
                 # Single non-string cell (numeric, date, time, etc.) - stop title search
-       
+
                 break
         elif len(meaningful_cells) == 0:
             # Empty row - stop title search
@@ -663,7 +673,7 @@ def extract_title_info(consolidated_data: List[List[Any]]) -> Tuple[Optional[str
             # Multiple meaningful cells - this could be headers or data, stop title search
 
             break
-    
+
     if title_parts:
         combined_title = " - ".join(title_parts)
         remaining_rows = consolidated_data[rows_consumed_by_title:]
@@ -681,21 +691,15 @@ def detect_header_info(data_for_headers: List[List[Any]]) -> Tuple[List[str], Li
     - Concatenate multi-row headers column-wise with " - "
     Returns: (final_header_list, actual_data_rows)
     """
-
     if not data_for_headers:
-
         return [], []
-    
-    # Print first few rows for debugging
 
-
-    
     potential_header_rows_content = []
     rows_consumed_by_header = 0
-    
+
     for idx, row in enumerate(data_for_headers):
 
-        
+
         # Count meaningful (non-empty) cells in the row
         meaningful_cells = []
         for cell_value in row:
@@ -703,12 +707,10 @@ def detect_header_info(data_for_headers: List[List[Any]]) -> Tuple[List[str], Li
                 cell_str = str(cell_value).strip()
                 if cell_str:  # Only count if there's actual non-empty content
                     meaningful_cells.append(cell_value)
-        
-                    non_empty_cell_count = len(meaningful_cells)
-        has_non_string = any(not is_string_value(cell) for cell in meaningful_cells)
-        
 
-        
+        non_empty_cell_count = len(meaningful_cells)
+        has_non_string = any(not is_string_value(cell) for cell in meaningful_cells)
+
         if non_empty_cell_count > 1 and not has_non_string:
             # Multiple string-only cells - this is a header row
             header_row = [str(cell).strip() if not is_cell_effectively_empty(cell) else "" for cell in row]
@@ -723,12 +725,12 @@ def detect_header_info(data_for_headers: List[List[Any]]) -> Tuple[List[str], Li
             # Row has non-string content, or is a single cell, or other non-header condition - stop header search
 
             break
-    
+
     # Process header rows
     final_header_list = []
     if potential_header_rows_content:
 
-        
+
         if len(potential_header_rows_content) == 1:
             # Single header row
             final_header_list = potential_header_rows_content[0]
@@ -738,7 +740,7 @@ def detect_header_info(data_for_headers: List[List[Any]]) -> Tuple[List[str], Li
 
             max_cols = max(len(r) for r in potential_header_rows_content) if potential_header_rows_content else 0
             final_header_list = [""] * max_cols
-            
+
             for col_idx in range(max_cols):
                 col_parts = []
                 for h_row_idx in range(len(potential_header_rows_content)):
@@ -747,13 +749,13 @@ def detect_header_info(data_for_headers: List[List[Any]]) -> Tuple[List[str], Li
                         cell_val_str = str(current_header_row_data[col_idx]).strip()
                         if cell_val_str:
                             col_parts.append(cell_val_str)
-                
+
                 final_header_list[col_idx] = " - ".join(col_parts) if col_parts else ""
 
-    
+
     actual_data_rows = data_for_headers[rows_consumed_by_header:]
 
-    
+
     return final_header_list, actual_data_rows
 
 def process_excel_in_memory(
@@ -773,14 +775,14 @@ def process_excel_in_memory(
     skip_datatype_ai: bool = False
 ) -> Tuple[List[Dict[str, Any]], BytesIO]:
     """Process an Excel file in memory and save tables to CSV files."""
-    
+
     extracted_tables_details = extract_tables_from_excel(excel_bytes)
     os.makedirs(output_dir, exist_ok=True)
     saved_csv_details: List[Dict[str, Any]] = []
-    
+
     # AI processing if enabled
     if enable_ai and (not skip_header_ai or not skip_datatype_ai):
-        
+
         try:
             from .ai_analysis import get_llm_analyzer
               # Only proceed if API key is available
@@ -790,17 +792,17 @@ def process_excel_in_memory(
                 pass  # Skip AI processing
         except Exception as e:
             pass  # Continue without AI features
-    
+
     for table_detail in extracted_tables_details:
         table_name = table_detail["name"]
         csv_buffer = table_detail["buffer"]
         output_file_path = os.path.join(output_dir, f"{table_name}.csv")
         with open(output_file_path, "wb") as f:
             f.write(csv_buffer.getvalue())
-        
+
         saved_csv_details.append({
-            "path": output_file_path, 
-            "name": table_name, 
+            "path": output_file_path,
+            "name": table_name,
             "headers": table_detail["headers"],
             "table_title": table_detail.get("identified_title"),
             "has_original_headers": table_detail.get("has_original_headers", False)
@@ -808,63 +810,65 @@ def process_excel_in_memory(
     if enable_ai and llm_api_key:
         try:
             from .ai_analysis import get_llm_analyzer, prepare_csv_sample_from_content, prepare_column_info_in_memory
-            
+
             analyzer = get_llm_analyzer(llm_provider, llm_api_key)
               # Collect all tables that need AI processing
             tables_for_header_ai = []
             tables_for_datatype_ai = {}
-            
-            for csv_detail in tqdm(saved_csv_details, desc="Preparing AI data", unit="table", leave=False):
+
+            logger.info(f"Preparing AI data for {len(saved_csv_details)} tables...")
+            for csv_detail in saved_csv_details:
                 csv_path = csv_detail["path"]
                 table_name = csv_detail["name"]
                 table_title = csv_detail.get("table_title")
                 has_original_headers = csv_detail.get("has_original_headers", False)
-                
-                # Collect tables that need header generation
+                  # Collect tables that need header generation
                 if not skip_header_ai and not has_original_headers:
                     try:
                         with open(csv_path, 'rb') as f:
                             csv_content = f.read()
-                        csv_sample = prepare_csv_sample_from_content(csv_content, max_rows=15)
-                        
-                        if csv_sample:                            tables_for_header_ai.append({
+                        csv_sample = prepare_csv_sample_from_content(csv_content, max_rows=get_config_value("max_csv_sample_rows", 15))
+
+                        if csv_sample:
+                            tables_for_header_ai.append({
                                 'table_name': table_name,
                                 'csv_sample_data': csv_sample,
                                 'table_title': table_title
                             })
                     except Exception as e:
-                        pass  # Failed to prepare header AI data
-                
+                        logger.error(f"Failed to prepare header AI data for {table_name}: {e}")
+
                 # Collect tables that need datatype validation
                 if not skip_datatype_ai and csv_detail.get("headers"):
                     try:
                         with open(csv_path, 'rb') as f:
                             csv_content = f.read()
                         headers = csv_detail["headers"]
-                        column_info = prepare_column_info_in_memory(csv_content, headers, max_sample_rows=20)
-                        
+                        column_info = prepare_column_info_in_memory(csv_content, headers, max_sample_rows=get_config_value("max_datatype_sample_rows", 20))
+
                         if column_info:
                             tables_for_datatype_ai[table_name] = column_info
                     except Exception as e:
-                        pass  # Failed to prepare datatype AI data
-            
-            # Batch process headers if any tables need it
+                        logger.error(f"Failed to prepare datatype AI data for {table_name}: {e}")
+              # Batch process headers if any tables need it
             batch_header_results = {}
             if tables_for_header_ai:
                 batch_header_results = analyzer.suggest_csv_headers_batch(tables_for_header_ai)
-                  # Apply header results to CSV files
-                for csv_detail in tqdm(saved_csv_details, desc="Applying AI headers", unit="table", leave=False):
+
+                # Apply header results to CSV files
+                logger.info(f"Applying AI headers to {len(saved_csv_details)} tables...")
+                for csv_detail in saved_csv_details:
                     table_name = csv_detail["name"]
                     csv_path = csv_detail["path"]
-                    
+
                     if table_name in batch_header_results and batch_header_results[table_name]:
                         try:
                             suggested_headers = batch_header_results[table_name]
-                            
+
                             # Read the CSV data and apply headers
                             import pandas as pd
                             df = pd.read_csv(csv_path, header=None)
-                            
+
                             # Add headers and overwrite the CSV
                             df.columns = suggested_headers[:len(df.columns)]  # Ensure we don't have more headers than columns
                             df.to_csv(csv_path, index=False, header=True)
@@ -872,39 +876,38 @@ def process_excel_in_memory(
                             csv_detail["headers"] = suggested_headers[:len(df.columns)]
                             csv_detail["has_original_headers"] = True
                         except Exception as e:
-                            pass  # Failed to apply AI headers
-              # Batch process datatypes if any tables need it
+                            pass  # Failed to apply AI headers            # Batch process datatypes if any tables need it
             batch_datatype_results = {}
             if tables_for_datatype_ai:
-                batch_datatype_results = analyzer.suggest_column_datatypes_batch(tables_for_datatype_ai)                # Apply datatype results
-                for csv_detail in tqdm(saved_csv_details, desc="Applying AI datatypes", unit="table", leave=False):
+                batch_datatype_results = analyzer.suggest_column_datatypes_batch(tables_for_datatype_ai)
+
+                # Apply datatype results
+                logger.info(f"Applying AI datatypes to {len(saved_csv_details)} tables...")
+                for csv_detail in saved_csv_details:
                     table_name = csv_detail["name"]
-                    
+
                     if table_name in batch_datatype_results and batch_datatype_results[table_name]:
-                        csv_detail["validated_column_types"] = batch_datatype_results[table_name]        
+                        csv_detail["validated_column_types"] = batch_datatype_results[table_name]
         except ImportError as e:
             pass  # AI modules not available
         except Exception as e:
             pass  # AI processing failed    # Generate DCAT metadata
-    with tqdm(total=1, desc="Generating DCAT metadata", unit="metadata", leave=False) as pbar:
-        from .metadata import generate_dcat_metadata
-        metadata_graph = generate_dcat_metadata(
-            original_excel_filename,
-            saved_csv_details, 
-            existing_dataset_uri=existing_dataset_uri,
-            original_source_description=original_source_description,
-            base_uri=base_uri,
-            publisher_uri=publisher_uri,
-            publisher_name=publisher_name,
-            license_uri=license_uri,
-        )
-        pbar.update(1)
-    
-    # Serialize metadata to buffer
-    with tqdm(total=1, desc="Serializing metadata", unit="buffer", leave=False) as pbar:
-        metadata_buffer = BytesIO()
-        metadata_graph.serialize(destination=metadata_buffer, format="turtle")
-        metadata_buffer.seek(0)
-        pbar.update(1)
-    
+    logger.info("Generating DCAT metadata...")
+    from .metadata import generate_dcat_metadata
+    metadata_graph = generate_dcat_metadata(
+        original_excel_filename,
+        saved_csv_details,
+        existing_dataset_uri=existing_dataset_uri,
+        original_source_description=original_source_description,
+        base_uri=base_uri,
+        publisher_uri=publisher_uri,
+        publisher_name=publisher_name,
+        license_uri=license_uri,
+    )
+      # Serialize metadata to buffer
+    logger.info("Serializing metadata...")
+    metadata_buffer = BytesIO()
+    metadata_graph.serialize(destination=metadata_buffer, format="turtle")
+    metadata_buffer.seek(0)
+
     return saved_csv_details, metadata_buffer

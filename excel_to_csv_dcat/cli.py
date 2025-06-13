@@ -13,16 +13,16 @@ def parse_args() -> argparse.Namespace:
         prog="excel-to-csv-dcat",
         description="Parse Excel tables and extract them to CSV files with DCAT-AP metadata"
     )
-    
+
     parser.add_argument("filename", help="Input Excel file path")
     parser.add_argument(
-        "-o", "--output-dir", 
-        default="output", 
+        "-o", "--output-dir",
+        default="output",
         help="Output directory for CSV files and metadata"
     )
     parser.add_argument(
-        "-m", "--metadata-format", 
-        choices=["turtle", "json-ld"], 
+        "-m", "--metadata-format",
+        choices=["turtle", "json-ld"],
         default="turtle",
         help="Metadata output format"
     )
@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip AI-powered datatype validation"
     )
-    
+
     return parser.parse_args()
 
 def validate_file_path(file_path: str) -> None:
@@ -107,7 +107,7 @@ def process_file(args: argparse.Namespace) -> Tuple[List[str], str]:
 
     # Process the Excel file
     csv_files, metadata_buffer = process_excel_in_memory(
-        excel_bytes, 
+        excel_bytes,
         args.filename,
         args.output_dir,
         base_uri=args.base_uri,
@@ -135,13 +135,13 @@ def main() -> None:
     try:
         args = parse_args()
         output_files, metadata_file = process_file(args)
-        
+
         print(f"✓ Processed {len(output_files)} tables from '{args.filename}'")
         print(f"✓ CSV files saved to: {args.output_dir}")
         for output_file in output_files:
             print(f"  - {os.path.basename(output_file)}")
         print(f"✓ Metadata saved to: {metadata_file}")
-        
+
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
