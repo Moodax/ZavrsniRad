@@ -96,11 +96,9 @@ def generate_dcat_metadata(
 
     else:
         if existing_dataset_uri:  # It was provided but invalid
-            print(f"Warning: Provided existing_dataset_uri '{existing_dataset_uri}' is invalid. Creating a new dataset description.")
-
-        # Original behavior: create and fully describe a new dataset
+            print(f"Warning: Provided existing_dataset_uri '{existing_dataset_uri}' is invalid. Creating a new dataset description.")        # Original behavior: create and fully describe a new dataset
         dataset_name = os.path.splitext(os.path.basename(input_file))[0]
-        dataset_uri_to_use = URIRef(f"{base_uri}{dataset_name}")
+        dataset_uri_to_use = URIRef(f"{base_uri}{quote(dataset_name)}")
 
         g.add((dataset_uri_to_use, RDF.type, DCAT.Dataset))
         g.add((dataset_uri_to_use, DCTERMS.title, Literal(f"Dataset derived from: {dataset_name}")))

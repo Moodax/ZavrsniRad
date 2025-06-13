@@ -7,6 +7,7 @@ import pandas as pd
 import openpyxl
 import os
 import re
+from tqdm import tqdm
 
 # --- Helper Functions ---
 def is_cell_effectively_empty(value) -> bool:
@@ -385,10 +386,10 @@ def count_effective_content_segments(sheet, r: int, c_start: int, c_end: int, me
             segments += 1
             in_segment = True
         elif is_empty and in_segment:
-            in_segment = False
-        
+            in_segment = False        
         current_c = effective_cell_max_c + 1  # Move to the next cell after the current one (or merged segment)
     return segments
+
 
 def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
     """Extract tables from Excel file, returning detailed table information."""
@@ -396,7 +397,8 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
     outputs = []
     wb = openpyxl.load_workbook(filename=excel_buffer, read_only=False, data_only=True)
 
-    for sheet_name in wb.sheetnames:
+    # Process sheets with progress bar
+    for sheet_name in tqdm(wb.sheetnames, desc="Processing Excel sheets", unit="sheet", leave=False):
         sheet = wb[sheet_name]
         current_sheet_merged_map = get_merged_cell_map(sheet)
 
@@ -428,10 +430,9 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                 if not re.search(r'[a-zA-Z0-9]', s_val):
                     print(f"INFO: Skipping trivial 1x1 table at ({r_min},{c_min}) with content: '{str(cell_value_obj)}' (no alphanumeric chars)")
                     continue
-            final_boxes_for_csv.append((r_min, r_max, c_min, c_max))        # 5. Process each table with new logic: merged cells → titles → headers → data
-        # First pass: Extract title/header info from all tables
+            final_boxes_for_csv.append((r_min, r_max, c_min, c_max))        # 5. Process each table with new logic: merged cells → titles → headers → data        # First pass: Extract title/header info from all tables
         table_processing_results = []
-        for block_idx, (min_r, max_r, min_c, max_c) in enumerate(final_boxes_for_csv):
+        for block_idx, (min_r, max_r, min_c, max_c) in enumerate(tqdm(final_boxes_for_csv, desc=f"Processing tables in {sheet_name}", unit="table", leave=False)):
            
             # Step 1: Consolidate Merged Cells for the Current Block
 
@@ -556,17 +557,33 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
         for entry in final_table_entries:
             min_r, max_r, min_c, max_c = entry["block_info"]
 
-            
-            # Step 4: Data Processing and CSV Generation
+              # Step 4: Data Processing and CSV Generation
 
-              # Create DataFrame - use headers if detected, otherwise no headers
-            if entry['csv_headers'] and any(str(header).strip() for header in entry['csv_headers']):
-                df = pd.DataFrame(entry['final_data_rows'], columns=entry['csv_headers'])
-                include_header = True
+            # Validate headers vs data columns consistency
+            if entry['final_data_rows']:
+                actual_columns = len(entry['final_data_rows'][0]) if entry['final_data_rows'] else 0
+                detected_headers = entry['csv_headers'] if entry['csv_headers'] else []
+                
+                # Check if we have headers and if they match the number of columns
+                if detected_headers and any(str(header).strip() for header in detected_headers):
+                    # We have non-empty headers
+                    if len(detected_headers) == actual_columns:                        # Headers match data columns - use them
+                        df = pd.DataFrame(entry['final_data_rows'], columns=detected_headers)
+                        include_header = True
+                    else:
+                        # Headers don't match data columns - create without headers
+                        df = pd.DataFrame(entry['final_data_rows'])
+                        entry['csv_headers'] = []  # Clear headers since they don't match
+                        include_header = False
+                else:
+                    # No proper headers detected, create DataFrame without headers
+                    df = pd.DataFrame(entry['final_data_rows'])
+                    entry['csv_headers'] = []  # Clear headers since none were detected
+                    include_header = False
             else:
-                # No proper headers detected, create DataFrame without headers
-                df = pd.DataFrame(entry['final_data_rows'])
-                entry['csv_headers'] = []  # Clear headers since none were detected
+                # No data rows - create empty DataFrame
+                df = pd.DataFrame()
+                entry['csv_headers'] = []
                 include_header = False
             
             # Generate CSV
@@ -589,16 +606,16 @@ def extract_tables_from_excel(excel_bytes: bytes) -> List[Dict[str, Any]]:
                 "name": table_name, 
                 "buffer": buf, 
                 "headers": entry['csv_headers'], 
-                "dims": entry["block_info"],
-                "identified_title": entry['table_title'],
+                "dims": entry["block_info"],                "identified_title": entry['table_title'],
                 "has_original_headers": include_header
             })
             
      
-          # Add all valid table entries to outputs
+        # Add all valid table entries to outputs
         outputs.extend(table_entries)
 
     return outputs
+
 
 def extract_title_info(consolidated_data: List[List[Any]]) -> Tuple[Optional[str], List[List[Any]]]:
     """
@@ -766,14 +783,13 @@ def process_excel_in_memory(
         
         try:
             from .ai_analysis import get_llm_analyzer
-            
-            # Only proceed if API key is available
+              # Only proceed if API key is available
             if llm_api_key:
                 analyzer = get_llm_analyzer(llm_provider, llm_api_key)
             else:
-                print("Warning: AI features enabled but no API key provided. Skipping AI processing.")
+                pass  # Skip AI processing
         except Exception as e:
-            print(f"Warning: AI processing failed: {e}. Continuing without AI features.")
+            pass  # Continue without AI features
     
     for table_detail in extracted_tables_details:
         table_name = table_detail["name"]
@@ -794,88 +810,101 @@ def process_excel_in_memory(
             from .ai_analysis import get_llm_analyzer, prepare_csv_sample_from_content, prepare_column_info_in_memory
             
             analyzer = get_llm_analyzer(llm_provider, llm_api_key)
+              # Collect all tables that need AI processing
+            tables_for_header_ai = []
+            tables_for_datatype_ai = {}
             
-            for csv_detail in saved_csv_details:
+            for csv_detail in tqdm(saved_csv_details, desc="Preparing AI data", unit="table", leave=False):
                 csv_path = csv_detail["path"]
                 table_name = csv_detail["name"]
                 table_title = csv_detail.get("table_title")
                 has_original_headers = csv_detail.get("has_original_headers", False)
                 
-                # Header generation for headerless tables
+                # Collect tables that need header generation
                 if not skip_header_ai and not has_original_headers:
                     try:
-                        # Read CSV content for AI analysis
                         with open(csv_path, 'rb') as f:
                             csv_content = f.read()
-                          # Prepare sample for AI
                         csv_sample = prepare_csv_sample_from_content(csv_content, max_rows=15)
                         
-                        if csv_sample:
-                            # Get AI suggestions
-                            suggested_headers = analyzer.suggest_csv_headers(csv_sample, table_title)
-                            
-                            if suggested_headers:
-                                # Auto-accept AI suggestions (no user interaction)
-                                validated_headers = suggested_headers
-                                
-                                if validated_headers:
-                                    # Read the CSV data
-                                    import pandas as pd
-                                    df = pd.read_csv(csv_path, header=None)
-                                    
-                                    # Add headers and overwrite the CSV
-                                    df.columns = validated_headers[:len(df.columns)]  # Ensure we don't have more headers than columns
-                                    df.to_csv(csv_path, index=False, header=True)
-                                      # Update the headers in saved_csv_details
-                                    csv_detail["headers"] = validated_headers[:len(df.columns)]
-                                    csv_detail["has_original_headers"] = True
+                        if csv_sample:                            tables_for_header_ai.append({
+                                'table_name': table_name,
+                                'csv_sample_data': csv_sample,
+                                'table_title': table_title
+                            })
                     except Exception as e:
-                        print(f"Warning: Header AI processing failed for table '{table_name}': {e}")
+                        pass  # Failed to prepare header AI data
                 
-                # Datatype validation for all tables with headers                if not skip_datatype_ai and csv_detail.get("headers"):
+                # Collect tables that need datatype validation
+                if not skip_datatype_ai and csv_detail.get("headers"):
                     try:
-                        # Read CSV content for datatype analysis
                         with open(csv_path, 'rb') as f:
                             csv_content = f.read()
-                        
                         headers = csv_detail["headers"]
-                        
-                        # Prepare column information
                         column_info = prepare_column_info_in_memory(csv_content, headers, max_sample_rows=20)
                         
                         if column_info:
-                            # Get AI datatype suggestions
-                            suggested_datatypes = analyzer.suggest_column_datatypes(column_info)
-                            
-                            if suggested_datatypes:
-                                # Auto-accept AI suggestions (no user interaction)
-                                validated_datatypes = suggested_datatypes
-                                
-                                if validated_datatypes:
-                                    # Store validated datatypes in csv_detail
-                                    csv_detail["validated_column_types"] = validated_datatypes
+                            tables_for_datatype_ai[table_name] = column_info
                     except Exception as e:
-                        print(f"Warning: Datatype AI processing failed for table '{table_name}': {e}")
-        
+                        pass  # Failed to prepare datatype AI data
+            
+            # Batch process headers if any tables need it
+            batch_header_results = {}
+            if tables_for_header_ai:
+                batch_header_results = analyzer.suggest_csv_headers_batch(tables_for_header_ai)
+                  # Apply header results to CSV files
+                for csv_detail in tqdm(saved_csv_details, desc="Applying AI headers", unit="table", leave=False):
+                    table_name = csv_detail["name"]
+                    csv_path = csv_detail["path"]
+                    
+                    if table_name in batch_header_results and batch_header_results[table_name]:
+                        try:
+                            suggested_headers = batch_header_results[table_name]
+                            
+                            # Read the CSV data and apply headers
+                            import pandas as pd
+                            df = pd.read_csv(csv_path, header=None)
+                            
+                            # Add headers and overwrite the CSV
+                            df.columns = suggested_headers[:len(df.columns)]  # Ensure we don't have more headers than columns
+                            df.to_csv(csv_path, index=False, header=True)
+                              # Update the headers in saved_csv_details
+                            csv_detail["headers"] = suggested_headers[:len(df.columns)]
+                            csv_detail["has_original_headers"] = True
+                        except Exception as e:
+                            pass  # Failed to apply AI headers
+              # Batch process datatypes if any tables need it
+            batch_datatype_results = {}
+            if tables_for_datatype_ai:
+                batch_datatype_results = analyzer.suggest_column_datatypes_batch(tables_for_datatype_ai)                # Apply datatype results
+                for csv_detail in tqdm(saved_csv_details, desc="Applying AI datatypes", unit="table", leave=False):
+                    table_name = csv_detail["name"]
+                    
+                    if table_name in batch_datatype_results and batch_datatype_results[table_name]:
+                        csv_detail["validated_column_types"] = batch_datatype_results[table_name]        
         except ImportError as e:
-            print(f"Warning: AI modules not available: {e}")
+            pass  # AI modules not available
         except Exception as e:
-            print(f"Warning: AI processing failed: {e}")
-
-    from .metadata import generate_dcat_metadata
-    metadata_graph = generate_dcat_metadata(
-        original_excel_filename,
-        saved_csv_details, 
-        existing_dataset_uri=existing_dataset_uri,
-        original_source_description=original_source_description,
-        base_uri=base_uri,
-        publisher_uri=publisher_uri,
-        publisher_name=publisher_name,
-        license_uri=license_uri,
-    )
+            pass  # AI processing failed    # Generate DCAT metadata
+    with tqdm(total=1, desc="Generating DCAT metadata", unit="metadata", leave=False) as pbar:
+        from .metadata import generate_dcat_metadata
+        metadata_graph = generate_dcat_metadata(
+            original_excel_filename,
+            saved_csv_details, 
+            existing_dataset_uri=existing_dataset_uri,
+            original_source_description=original_source_description,
+            base_uri=base_uri,
+            publisher_uri=publisher_uri,
+            publisher_name=publisher_name,
+            license_uri=license_uri,
+        )
+        pbar.update(1)
     
-    metadata_buffer = BytesIO()
-    metadata_graph.serialize(destination=metadata_buffer, format="turtle")
-    metadata_buffer.seek(0)
+    # Serialize metadata to buffer
+    with tqdm(total=1, desc="Serializing metadata", unit="buffer", leave=False) as pbar:
+        metadata_buffer = BytesIO()
+        metadata_graph.serialize(destination=metadata_buffer, format="turtle")
+        metadata_buffer.seek(0)
+        pbar.update(1)
     
     return saved_csv_details, metadata_buffer
