@@ -23,6 +23,7 @@ class ExcelConverterGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Excel to CSV Converter with DCAT")
+        
         self.root.geometry("600x400")
         
         # Variables
@@ -32,6 +33,13 @@ class ExcelConverterGUI:
         self.publisher_name = tk.StringVar(value="Example Organization")
         self.publisher_uri = tk.StringVar(value="http://example.org/publisher")
         self.license_uri = tk.StringVar(value="http://creativecommons.org/licenses/by/4.0/")
+        
+        # AI-related variables
+        self.enable_ai = tk.BooleanVar(value=False)
+        self.llm_provider = tk.StringVar(value="openai")
+        self.llm_api_key = tk.StringVar(value="")
+        self.skip_header_ai = tk.BooleanVar(value=False)
+        self.skip_datatype_ai = tk.BooleanVar(value=False)
         
         self._create_widgets()
     
@@ -95,19 +103,52 @@ class ExcelConverterGUI:
             row=3, column=1, padx=5, pady=5, sticky="ew"
         )
         
+        # AI Features section
+        ai_frame = ttk.LabelFrame(self.root, text="AI Features (Experimental)", padding="5")
+        ai_frame.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        # Enable AI checkbox
+        ttk.Checkbutton(ai_frame, text="Enable AI features", variable=self.enable_ai).grid(
+            row=0, column=0, columnspan=2, padx=5, pady=5, sticky="w"
+        )
+        
+        # LLM Provider
+        ttk.Label(ai_frame, text="LLM Provider:").grid(
+            row=1, column=0, padx=5, pady=5, sticky="w"
+        )
+        provider_combo = ttk.Combobox(ai_frame, textvariable=self.llm_provider, 
+                                      values=["openai", "gemini"], state="readonly")
+        provider_combo.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        
+        # API Key
+        ttk.Label(ai_frame, text="API Key:").grid(
+            row=2, column=0, padx=5, pady=5, sticky="w"
+        )
+        ttk.Entry(ai_frame, textvariable=self.llm_api_key, show="*").grid(
+            row=2, column=1, padx=5, pady=5, sticky="ew"
+        )
+        
+        # Skip options
+        ttk.Checkbutton(ai_frame, text="Skip header generation", variable=self.skip_header_ai).grid(
+            row=3, column=0, padx=5, pady=5, sticky="w"
+        )
+        ttk.Checkbutton(ai_frame, text="Skip datatype validation", variable=self.skip_datatype_ai).grid(
+            row=3, column=1, padx=5, pady=5, sticky="w"
+        )
+        
         # Progress
         self.progress = ttk.Progressbar(self.root, mode='indeterminate')
-        self.progress.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        self.progress.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
         
         # Convert button
         self.convert_btn = ttk.Button(
             self.root, text="Convert", command=self._convert, state="disabled"
         )
-        self.convert_btn.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
+        self.convert_btn.grid(row=6, column=0, columnspan=2, padx=5, pady=5)
         
         # Configure grid
         self.root.columnconfigure(0, weight=1)
-        for frame in (input_frame, output_frame, metadata_frame):
+        for frame in (input_frame, output_frame, metadata_frame, ai_frame):
             frame.columnconfigure(1, weight=1)
     
     def _select_input(self):
@@ -133,6 +174,7 @@ class ExcelConverterGUI:
         """Enable/disable convert button based on selections."""
         if self.input_file and self.output_dir:
             self.convert_btn.config(state="normal")
+        
         else:
             self.convert_btn.config(state="disabled")
     
@@ -160,9 +202,7 @@ class ExcelConverterGUI:
 
             # Read Excel file into memory
             with open(self.input_file, "rb") as f:
-                excel_bytes = f.read()
-
-            # Process Excel file and get CSV files and metadata
+                excel_bytes = f.read()            # Process Excel file and get CSV files and metadata
             csv_files, metadata_buffer = process_excel_in_memory(
                 excel_bytes,
                 os.path.basename(self.input_file), # Pass the original Excel filename
@@ -171,6 +211,11 @@ class ExcelConverterGUI:
                 publisher_uri=self.publisher_uri.get(),
                 publisher_name=self.publisher_name.get(),
                 license_uri=self.license_uri.get(),
+                enable_ai=self.enable_ai.get(),
+                llm_provider=self.llm_provider.get(),
+                llm_api_key=self.llm_api_key.get() if self.llm_api_key.get().strip() else None,
+                skip_header_ai=self.skip_header_ai.get(),
+                skip_datatype_ai=self.skip_datatype_ai.get()
             )
 
             # Save metadata

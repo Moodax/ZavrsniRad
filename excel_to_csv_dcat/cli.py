@@ -6,7 +6,6 @@ import argparse
 from typing import List, Tuple
 
 from .core import process_excel_in_memory
-from .metadata import generate_dcat_metadata
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -47,6 +46,44 @@ def parse_args() -> argparse.Namespace:
         default="http://creativecommons.org/licenses/by/4.0/",
         help="URI of the license under which data is published"
     )
+    parser.add_argument(
+        "--existing-dataset-uri",
+        type=str,
+        default=None,
+        help="Optional URI of a pre-existing DCAT Dataset to link generated distributions to."
+    )
+    parser.add_argument(
+        "--original-source-description",
+        type=str,
+        default=None,
+        help="Optional text describing the original source of the dataset."
+    )
+    parser.add_argument(
+        "--enable-ai",
+        action="store_true",
+        help="Enable AI-powered features for header generation and datatype validation"
+    )
+    parser.add_argument(
+        "--llm-provider",
+        choices=["openai", "gemini"],
+        default="openai",
+        help="LLM provider to use for AI features (default: openai)"
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        type=str,
+        help="API key for the selected LLM provider (can also be set via environment variables)"
+    )
+    parser.add_argument(
+        "--skip-header-ai",
+        action="store_true",
+        help="Skip AI-powered header generation for headerless tables"
+    )
+    parser.add_argument(
+        "--skip-datatype-ai",
+        action="store_true",
+        help="Skip AI-powered datatype validation"
+    )
     
     return parser.parse_args()
 
@@ -69,76 +106,48 @@ def process_file(args: argparse.Namespace) -> Tuple[List[str], str]:
         excel_bytes = f.read()
 
     # Process the Excel file
-    output_files = process_excel_in_memory(excel_bytes, args.output_dir, args.filename)
-
-    # Generate DCAT metadata
-    g = generate_dcat_metadata(
+    csv_files, metadata_buffer = process_excel_in_memory(
+        excel_bytes, 
         args.filename,
-        output_files,
+        args.output_dir,
         base_uri=args.base_uri,
         publisher_uri=args.publisher_uri,
         publisher_name=args.publisher_name,
-        license_uri=args.license
+        license_uri=args.license,
+        existing_dataset_uri=args.existing_dataset_uri,
+        original_source_description=args.original_source_description,
+        enable_ai=args.enable_ai,
+        llm_provider=args.llm_provider,
+        llm_api_key=args.llm_api_key,
+        skip_header_ai=args.skip_header_ai,
+        skip_datatype_ai=args.skip_datatype_ai
     )
 
     # Save metadata
     metadata_file = os.path.join(args.output_dir, f"metadata.{args.metadata_format}")
-    g.serialize(destination=metadata_file, format=args.metadata_format)
+    with open(metadata_file, 'wb') as f:
+        f.write(metadata_buffer.getvalue())
 
-    return output_files, metadata_file
+    return [f["path"] for f in csv_files], metadata_file
 
 def main() -> None:
     """Main entry point for the CLI."""
-    args = parse_args()
-
     try:
-        # Convert paths to absolute and normalize them
-        input_file = os.path.abspath(os.path.normpath(args.filename))
-        output_dir = os.path.abspath(os.path.normpath(args.output_dir))
-
-        if not os.path.exists(input_file):
-            print(f"Error: Input file not found: {input_file}", file=sys.stderr)
-            sys.exit(1)
-
-        # Read Excel file into memory
-        with open(input_file, "rb") as f:
-            excel_bytes = f.read()
-
-        # Process Excel file and get CSV files and metadata
-        csv_files, metadata_buffer = process_excel_in_memory(
-            excel_bytes,
-            os.path.basename(input_file), # Pass the original Excel filename
-            output_dir,
-            base_uri=args.base_uri,
-            publisher_uri=args.publisher_uri,
-            publisher_name=args.publisher_name,
-            license_uri=args.license # Make sure 'license' is the correct attribute name from args
-        )
-
-        # Save metadata
-        # Determine the correct extension based on args.metadata_format
-        metadata_ext = args.metadata_format
-        if args.metadata_format == "turtle":
-            metadata_ext = "ttl"
-        elif args.metadata_format == "json-ld":
-            metadata_ext = "jsonld"
+        args = parse_args()
+        output_files, metadata_file = process_file(args)
         
-        metadata_file_path = os.path.join(output_dir, f"metadata.{metadata_ext}")
+        print(f"✓ Processed {len(output_files)} tables from '{args.filename}'")
+        print(f"✓ CSV files saved to: {args.output_dir}")
+        for output_file in output_files:
+            print(f"  - {os.path.basename(output_file)}")
+        print(f"✓ Metadata saved to: {metadata_file}")
         
-        with open(metadata_file_path, "wb") as f:
-            f.write(metadata_buffer.getvalue())
-
-        print(f"Successfully processed {len(csv_files)} tables:")
-        for csv_file in csv_files:
-            print(f"- {os.path.basename(csv_file)}")
-        print(f"Metadata saved to: {os.path.basename(metadata_file_path)}")
-
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
-        # Consider more specific error handling or logging
-        # import traceback
-        # traceback.print_exc() 
+        print(f"Unexpected error: {e}", file=sys.stderr)
         sys.exit(1)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
